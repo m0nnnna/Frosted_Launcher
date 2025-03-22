@@ -8,7 +8,7 @@ OS = platform.system().lower()
 SCRIPT_NAME = "launcher.py"
 ICON_PNG = "1.png"
 ICON_ICO = "1.ico"
-OUTPUT_NAME = "SnowCaller Launcher"
+OUTPUT_NAME = "SnowCallerLauncher"
 
 def check_files():
     """Ensure required files exist."""

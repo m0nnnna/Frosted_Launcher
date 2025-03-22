@@ -7,6 +7,7 @@ import tkinter as tk
 from tkinter import messagebox, filedialog, ttk
 import threading
 import time
+import shutil
 
 # Detect the operating system
 OS = platform.system().lower()
@@ -23,7 +24,6 @@ def get_base_dir():
 def get_resource_path(relative_path):
     """Get the path to bundled resources (e.g., icon) in PyInstaller."""
     if getattr(sys, 'frozen', False):
-        # PyInstaller creates a temp folder for bundled files
         base_path = sys._MEIPASS
     else:
         base_path = os.path.abspath(os.path.dirname(__file__))
@@ -55,6 +55,41 @@ def write_config(install_dir):
     config_path = os.path.join(install_dir, "snowcaller", CONFIG_FILE_NAME)
     with open(config_path, 'w') as f:
         f.write(f"install_dir={install_dir}")
+
+def create_desktop_icon(install_dir):
+    """Create a .desktop file on the Desktop for Linux."""
+    if OS != "linux":
+        return
+    
+    base_dir = get_base_dir()
+    executable_path = os.path.join(base_dir, "SnowCallerLauncher")
+    icon_source = get_resource_path(ICON_FILE)
+    icon_dir = os.path.expanduser("~/.snowcaller")
+    icon_dest = os.path.join(icon_dir, "snowcaller.png")
+    desktop_dest = os.path.expanduser("~/Desktop/snowcaller.desktop")
+
+    # Create ~/.snowcaller directory and copy the icon
+    if not os.path.exists(icon_dir):
+        os.makedirs(icon_dir)
+    if not os.path.exists(icon_dest):
+        shutil.copy(icon_source, icon_dest)
+
+    # Create the .desktop file content
+    desktop_content = f"""[Desktop Entry]
+Name=SnowCaller
+Exec={executable_path}
+Type=Application
+Icon={icon_dest}
+Terminal=false
+Categories=Game;
+Comment=Launch the SnowCaller game
+"""
+    # Write the .desktop file to the Desktop
+    with open(desktop_dest, 'w') as f:
+        f.write(desktop_content)
+    
+    # Make it executable
+    os.chmod(desktop_dest, 0o755)
 
 def update_progress(progress_bar, label, value, text):
     """Update the progress bar and label."""
@@ -161,6 +196,7 @@ def setup_with_progress(root, install_dir):
         install_requests(progress_bar, label)
         setup_game(progress_bar, label, install_dir)
         write_config(install_dir)  # Save config in snowcaller folder
+        create_desktop_icon(install_dir)  # Create desktop icon on Linux
         progress_window.destroy()
         show_launcher_menu(root, install_dir)  # Show menu after setup
 

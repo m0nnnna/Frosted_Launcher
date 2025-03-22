@@ -147,16 +147,25 @@ def setup_game(progress_bar, label, install_dir):
     time.sleep(1)  # Brief pause to show completion
 
 def launch_game(install_dir, root):
-    """Launch the default terminal and exit the script."""
+    """Launch the game directly and close the launcher."""
     game_dir = os.path.join(install_dir, "snowcaller")
     python_cmd = "python" if OS == "windows" else "python3"
+    game_script = os.path.join(game_dir, "game.py")
+
+    if not os.path.exists(game_dir) or not os.path.exists(game_script):
+        messagebox.showerror("Error", f"Game directory or script not found: {game_script}")
+        root.quit()
+        root.destroy()
+        return
+
     if OS == "windows":
-        cmd = f'start cmd /k cd /d "{game_dir}" && {python_cmd} game.py'
-        print(f"Launching Command Prompt with: {cmd}")  # Debug
+        cmd = [python_cmd, "game.py"]
+        print(f"Launching game with: {' '.join(cmd)} in {game_dir}")  # Debug
         try:
-            os.system(cmd)  # Use os.system for reliable Windows CMD launch
+            # Run the game in the current process environment, non-blocking
+            subprocess.Popen(cmd, cwd=game_dir, shell=False)
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to launch Command Prompt: {e}")
+            messagebox.showerror("Error", f"Failed to launch game: {e}")
     elif OS == "linux":  # Debian (GNOME, XFCE, KDE)
         terminals = [
             ("gnome-terminal", f'gnome-terminal -- bash -c "cd {game_dir} && {python_cmd} game.py; exec bash"'),
@@ -170,7 +179,10 @@ def launch_game(install_dir, root):
                 break
         else:
             messagebox.showerror("Error", "No supported terminal found (gnome-terminal, xfce4-terminal, konsole, xterm).")
-    root.quit()  # Exit the Tkinter mainloop after launching
+
+    # Close the launcher immediately
+    root.quit()
+    root.destroy()
 
 def delete_save(install_dir):
     """Delete save.json in the snowcaller folder if it exists."""
@@ -226,7 +238,7 @@ def show_launcher_menu(root, install_dir):
     tk.Label(menu_window, text="SnowCaller", pady=10).pack()
     tk.Button(menu_window, text="Play", command=lambda: launch_game(install_dir, root)).pack(pady=5)
     tk.Button(menu_window, text="Delete Save", command=lambda: delete_save(install_dir)).pack(pady=5)
-    tk.Button(menu_window, text="Close", command=root.quit).pack(pady=5)
+    tk.Button(menu_window, text="Close", command=lambda: [root.quit(), root.destroy()]).pack(pady=5)
 
 def main():
     root = tk.Tk()

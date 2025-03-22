@@ -55,9 +55,13 @@ def read_config(base_dir=None):
     return None
 
 def write_config(install_dir):
-    """Write the install directory to config file inside the snowcaller folder."""
-    config_path = os.path.join(install_dir, "snowcaller", CONFIG_FILE_NAME)
+    """Write the install directory to config file in the launcher's directory."""
+    base_dir = get_base_dir()
+    config_dir = os.path.join(base_dir, "snowcaller")
+    config_path = os.path.join(config_dir, CONFIG_FILE_NAME)
     print(f"Writing config to: {config_path}")  # Debug
+    if not os.path.exists(config_dir):
+        os.makedirs(config_dir)
     with open(config_path, 'w') as f:
         f.write(f"install_dir={install_dir}")
 
@@ -147,10 +151,10 @@ def launch_game(install_dir, root):
     game_dir = os.path.join(install_dir, "snowcaller")
     python_cmd = "python" if OS == "windows" else "python3"
     if OS == "windows":
-        cmd = f'cmd /k cd /d "{game_dir}" && {python_cmd} game.py'
+        cmd = f'start cmd /k cd /d "{game_dir}" && {python_cmd} game.py'
         print(f"Launching Command Prompt with: {cmd}")  # Debug
         try:
-            subprocess.Popen(cmd, shell=True, creationflags=subprocess.CREATE_NEW_CONSOLE)
+            os.system(cmd)  # Use os.system for reliable Windows CMD launch
         except Exception as e:
             messagebox.showerror("Error", f"Failed to launch Command Prompt: {e}")
     elif OS == "linux":  # Debian (GNOME, XFCE, KDE)
@@ -201,7 +205,7 @@ def setup_with_progress(root, install_dir):
             install_git(progress_bar, label)
         install_requests(progress_bar, label)
         setup_game(progress_bar, label, install_dir)
-        write_config(install_dir)  # Save config in snowcaller folder
+        write_config(install_dir)  # Save config in launcher's directory
         if OS == "linux":
             create_desktop_icon(install_dir)  # Create desktop icon on Linux
         progress_window.destroy()

@@ -41,18 +41,23 @@ def read_config(base_dir=None):
     """Read the install directory from config file if it exists."""
     if base_dir:
         config_path = os.path.join(base_dir, "snowcaller", CONFIG_FILE_NAME)
+        print(f"Checking config at: {config_path}")  # Debug
         if os.path.exists(config_path):
             with open(config_path, 'r') as f:
                 lines = f.readlines()
                 if lines and lines[0].startswith("install_dir="):
                     saved_dir = lines[0].split("=", 1)[1].strip()
+                    print(f"Found config with install_dir: {saved_dir}")  # Debug
                     if os.path.exists(saved_dir) and os.path.exists(os.path.join(saved_dir, "snowcaller")):
                         return saved_dir
+        else:
+            print(f"Config file not found at: {config_path}")  # Debug
     return None
 
 def write_config(install_dir):
     """Write the install directory to config file inside the snowcaller folder."""
     config_path = os.path.join(install_dir, "snowcaller", CONFIG_FILE_NAME)
+    print(f"Writing config to: {config_path}")  # Debug
     with open(config_path, 'w') as f:
         f.write(f"install_dir={install_dir}")
 
@@ -68,13 +73,11 @@ def create_desktop_icon(install_dir):
     icon_dest = os.path.join(icon_dir, "snowcaller.png")
     desktop_dest = os.path.expanduser("~/Desktop/snowcaller.desktop")
 
-    # Create ~/.snowcaller directory and copy the icon
     if not os.path.exists(icon_dir):
         os.makedirs(icon_dir)
     if not os.path.exists(icon_dest):
         shutil.copy(icon_source, icon_dest)
 
-    # Create the .desktop file content
     desktop_content = f"""[Desktop Entry]
 Name=SnowCaller
 Exec={executable_path}
@@ -84,11 +87,9 @@ Terminal=false
 Categories=Game;
 Comment=Launch the SnowCaller game
 """
-    # Write the .desktop file to the Desktop
     with open(desktop_dest, 'w') as f:
         f.write(desktop_content)
     
-    # Make it executable
     os.chmod(desktop_dest, 0o755)
 
 def update_progress(progress_bar, label, value, text):
@@ -146,7 +147,12 @@ def launch_game(install_dir, root):
     game_dir = os.path.join(install_dir, "snowcaller")
     python_cmd = "python" if OS == "windows" else "python3"
     if OS == "windows":
-        subprocess.Popen(f'cmd /k cd /d "{game_dir}" && {python_cmd} game.py', shell=True)
+        cmd = f'cmd /k cd /d "{game_dir}" && {python_cmd} game.py'
+        print(f"Launching Command Prompt with: {cmd}")  # Debug
+        try:
+            subprocess.Popen(cmd, shell=True, creationflags=subprocess.CREATE_NEW_CONSOLE)
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to launch Command Prompt: {e}")
     elif OS == "linux":  # Debian (GNOME, XFCE, KDE)
         terminals = [
             ("gnome-terminal", f'gnome-terminal -- bash -c "cd {game_dir} && {python_cmd} game.py; exec bash"'),
@@ -196,7 +202,8 @@ def setup_with_progress(root, install_dir):
         install_requests(progress_bar, label)
         setup_game(progress_bar, label, install_dir)
         write_config(install_dir)  # Save config in snowcaller folder
-        create_desktop_icon(install_dir)  # Create desktop icon on Linux
+        if OS == "linux":
+            create_desktop_icon(install_dir)  # Create desktop icon on Linux
         progress_window.destroy()
         show_launcher_menu(root, install_dir)  # Show menu after setup
 
@@ -223,6 +230,7 @@ def main():
 
     # Try to find an existing install directory from the config in the executable's directory
     base_dir = get_base_dir()
+    print(f"Base directory: {base_dir}")  # Debug
     install_dir = read_config(base_dir)
 
     if install_dir:
@@ -237,7 +245,7 @@ def main():
 
         # Prompt for install directory with New Folder option
         install_dir = filedialog.askdirectory(
-            title="Select where to install SnowCaller (click 'New Folder' to create one)",
+            title="Select where to install SnowCaller (click 'Make New Folder' to create one)",
             mustexist=False  # Allows creating a new folder
         )
         if not install_dir:

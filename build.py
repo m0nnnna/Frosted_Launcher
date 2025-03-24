@@ -11,6 +11,7 @@ import platform
 import logging
 import venv
 from pathlib import Path
+import time
 
 # Set up logging
 logging.basicConfig(
@@ -35,25 +36,36 @@ OS = platform.system().lower()
 if OS == "windows":
     EXECUTABLE_EXTENSION = ".exe"
     ICON_EXTENSION = ".ico"
-    VENV_PYTHON = "venv/Scripts/python.exe"
-    VENV_PIP = "venv/Scripts/pip.exe"
+    VENV_PYTHON = os.path.join("venv", "Scripts", "python.exe")
+    VENV_PIP = os.path.join("venv", "Scripts", "pip.exe")
 else:
     EXECUTABLE_EXTENSION = ""
     ICON_EXTENSION = ".png"
-    VENV_PYTHON = "venv/bin/python"
-    VENV_PIP = "venv/bin/pip"
+    VENV_PYTHON = os.path.join("venv", "bin", "python")
+    VENV_PIP = os.path.join("venv", "bin", "pip")
 
 def create_virtual_environment():
     """Create a virtual environment for building."""
     if not os.path.exists("venv"):
         logging.info("Creating virtual environment...")
         try:
+            # First, ensure python3-venv is installed
+            subprocess.run(
+                ["sudo", "apt-get", "install", "-y", "python3-venv"],
+                check=True,
+                capture_output=True
+            )
+            
             # Use system Python for virtual environment creation
             system_python = "/usr/bin/python3"
             if not os.path.exists(system_python):
                 system_python = "/usr/bin/python"
             
             logging.info(f"Using system Python: {system_python}")
+            
+            # Remove existing venv directory if it exists
+            if os.path.exists("venv"):
+                shutil.rmtree("venv")
             
             # Create virtual environment using system Python
             subprocess.run(
@@ -62,9 +74,15 @@ def create_virtual_environment():
                 capture_output=True
             )
             
+            # Wait a moment for the filesystem to sync
+            time.sleep(1)
+            
             # Verify virtual environment was created
             if not os.path.exists(VENV_PYTHON):
                 raise FileNotFoundError(f"Virtual environment Python not found at {VENV_PYTHON}")
+            
+            # Make sure the Python executable is executable
+            os.chmod(VENV_PYTHON, 0o755)
             
             # Upgrade pip in the virtual environment
             subprocess.run(
@@ -74,27 +92,56 @@ def create_virtual_environment():
             )
             
             logging.info("Virtual environment setup complete")
+            logging.info(f"Virtual environment Python path: {VENV_PYTHON}")
+            logging.info(f"Virtual environment exists: {os.path.exists(VENV_PYTHON)}")
+            
         except subprocess.CalledProcessError as e:
             logging.error(f"Virtual environment setup failed: {e.stderr}")
             raise
         except Exception as e:
             logging.error(f"Unexpected error during virtual environment setup: {str(e)}")
             raise
+    else:
+        logging.info("Virtual environment already exists")
+        if not os.path.exists(VENV_PYTHON):
+            logging.error(f"Virtual environment exists but Python not found at {VENV_PYTHON}")
+            raise FileNotFoundError(f"Virtual environment Python not found at {VENV_PYTHON}")
+        logging.info(f"Using existing virtual environment at {VENV_PYTHON}")
 
 def check_dependencies():
     """Check if required build dependencies are installed."""
     try:
-        # For Linux, try to install python3-full first
+        # For Linux, try to install required system packages
         if OS == "linux":
             try:
+                # Update package lists
                 subprocess.run(
-                    ["sudo", "apt-get", "install", "-y", "python3-full", "python3-venv"],
+                    ["sudo", "apt-get", "update"],
                     check=True,
                     capture_output=True
                 )
-                logging.info("Successfully installed python3-full and python3-venv")
+                
+                # Install MinGW and required packages for cross-compilation
+                subprocess.run(
+                    ["sudo", "apt-get", "install", "-y", 
+                     "mingw-w64",
+                     "mingw-w64-tools",
+                     "mingw-w64-x86-64-dev",
+                     "python3-pip",
+                     "build-essential",
+                     "python3-dev"],
+                    check=True,
+                    capture_output=True
+                )
+                
+                logging.info("MinGW and build dependencies installed successfully")
+                
             except subprocess.CalledProcessError as e:
-                logging.warning(f"Failed to install system packages: {e.stderr}")
+                logging.error(f"Failed to install MinGW: {e.stderr}")
+                raise
+            except Exception as e:
+                logging.error(f"Unexpected error during MinGW installation: {str(e)}")
+                raise
         
         # Create virtual environment first
         create_virtual_environment()
@@ -138,7 +185,7 @@ def convert_icon():
 
 def clean_build():
     """Clean previous build artifacts."""
-    dirs_to_clean = ['build', 'dist', 'venv']
+    dirs_to_clean = ['build', 'dist']
     files_to_clean = [
         f"{APP_NAME}.spec",
         f"{APP_NAME}{ICON_EXTENSION}",
@@ -158,9 +205,6 @@ def clean_build():
 
 def build_executable():
     """Build the executable using PyInstaller."""
-    # Determine which Python to use
-    python_executable = VENV_PYTHON if os.path.exists(VENV_PYTHON) else sys.executable
-    
     # Get absolute paths
     current_dir = os.path.abspath(os.path.dirname(__file__))
     icon_path = os.path.join(current_dir, ICON_FILE)
@@ -172,62 +216,132 @@ def build_executable():
     if not os.path.exists(launcher_path):
         raise FileNotFoundError(f"Launcher file not found: {launcher_path}")
     
-    # Base PyInstaller command
-    cmd = [
-        python_executable,
+    # Build Linux executable
+    logging.info("Building Linux executable...")
+    linux_cmd = [
+        VENV_PYTHON,
         "-m",
         "PyInstaller",
-        "--name", APP_NAME,
+        "--name", f"{APP_NAME}_linux",
         "--onefile",
         "--noconsole",
         "--clean",
         "--add-data", f"{ICON_FILE}{os.pathsep}.",
+        "--icon", f"{APP_NAME}{ICON_EXTENSION}",
+        "--version-file", "version_info.txt",
+        "--add-binary", f"git.exe{os.pathsep}.",
+        "--distpath", "dist",
+        "--workpath", "build",
+        "--specpath", ".",
         "launcher.py"
     ]
     
-    # Add platform-specific options
-    if OS == "windows":
-        cmd.extend([
+    # Build Windows executable
+    logging.info("Building Windows executable...")
+    if OS == "linux":
+        # For Linux, use MinGW for cross-compilation
+        # Set up cross-compilation environment
+        os.environ["CC"] = "x86_64-w64-mingw32-gcc"
+        os.environ["CXX"] = "x86_64-w64-mingw32-g++"
+        os.environ["PYTHONPATH"] = os.pathsep.join([os.getcwd(), os.environ.get("PYTHONPATH", "")])
+        
+        # Convert icon for Windows
+        convert_icon()
+        
+        # Create version info for Windows
+        create_version_info()
+        
+        windows_cmd = [
+            VENV_PYTHON,
+            "-m",
+            "PyInstaller",
+            "--name", f"{APP_NAME}_windows",
+            "--onefile",
+            "--noconsole",
+            "--clean",
+            "--add-data", f"{ICON_FILE}{os.pathsep}.",
             "--icon", f"{APP_NAME}{ICON_EXTENSION}",
             "--version-file", "version_info.txt",
-            "--add-binary", f"git-2.43.0-64-bit.exe{os.pathsep}."
-        ])
-    elif OS == "linux":
-        cmd.extend([
-            "--icon", ICON_FILE
-        ])
+            "--add-binary", f"git.exe{os.pathsep}.",
+            "--target-architecture", "x86_64",
+            "--distpath", "dist",
+            "--workpath", "build",
+            "--specpath", ".",
+            "launcher.py"
+        ]
+    else:
+        # For Windows, use local Python
+        python_executable = VENV_PYTHON if os.path.exists(VENV_PYTHON) else sys.executable
+        windows_cmd = [
+            python_executable,
+            "-m",
+            "PyInstaller",
+            "--name", f"{APP_NAME}_windows",
+            "--onefile",
+            "--noconsole",
+            "--clean",
+            "--add-data", f"{ICON_FILE}{os.pathsep}.",
+            "--icon", f"{APP_NAME}{ICON_EXTENSION}",
+            "--version-file", "version_info.txt",
+            "--add-binary", f"git.exe{os.pathsep}.",
+            "launcher.py"
+        ]
     
-    # Print command for debugging
-    logging.info("Running PyInstaller command:")
-    logging.info(" ".join(cmd))
-    
-    # Run PyInstaller with detailed error output
+    # Build Linux executable
     try:
+        logging.info("Running Linux build command:")
+        logging.info(" ".join(linux_cmd))
         result = subprocess.run(
-            cmd,
+            linux_cmd,
             check=True,
             capture_output=True,
             text=True,
-            cwd=current_dir  # Set working directory
+            cwd=current_dir
         )
+        logging.info("Linux build output:")
+        logging.info(result.stdout)
     except subprocess.CalledProcessError as e:
-        logging.error(f"Build failed with error code: {e.returncode}")
-        logging.error("Build output:")
-        logging.error(e.stdout)
-        logging.error("Build errors:")
-        logging.error(e.stderr)
+        logging.error(f"Linux build failed: {e.stderr}")
         raise
     
-    logging.info("Build completed successfully")
+    # Build Windows executable
+    try:
+        logging.info("Running Windows build command:")
+        logging.info(" ".join(windows_cmd))
+        result = subprocess.run(
+            windows_cmd,
+            check=True,
+            capture_output=True,
+            text=True,
+            cwd=current_dir
+        )
+        logging.info("Windows build output:")
+        logging.info(result.stdout)
+    except subprocess.CalledProcessError as e:
+        logging.error(f"Windows build failed: {e.stderr}")
+        raise
     
-    # Make executable on Linux
-    if OS == "linux":
-        executable_path = os.path.join("dist", APP_NAME)
-        if os.path.exists(executable_path):
-            os.chmod(executable_path, 0o755)
-            logging.info(f"Set executable permissions on {executable_path}")
-        else:
-            logging.warning(f"Executable not found at {executable_path}")
+    # Verify both executables were created
+    linux_executable = os.path.join("dist", f"{APP_NAME}_linux")
+    windows_executable = os.path.join("dist", f"{APP_NAME}_windows")
+    
+    if not os.path.exists(linux_executable):
+        raise FileNotFoundError(f"Linux executable not created at {linux_executable}")
+    if not os.path.exists(windows_executable):
+        raise FileNotFoundError(f"Windows executable not created at {windows_executable}")
+    
+    # Rename Windows executable to add .exe extension
+    windows_exe = windows_executable + ".exe"
+    if os.path.exists(windows_exe):
+        os.remove(windows_exe)
+    os.rename(windows_executable, windows_exe)
+    
+    # Set permissions for Linux executable
+    os.chmod(linux_executable, 0o755)
+    
+    logging.info(f"Build completed successfully. Created:")
+    logging.info(f"Linux executable: {linux_executable}")
+    logging.info(f"Windows executable: {windows_exe}")
 
 def create_version_info():
     """Create version info file for Windows."""
@@ -276,18 +390,29 @@ def download_dependencies():
     }
     
     for os_name, deps in dependencies.items():
-        if os_name == OS:
+        if os_name == "windows":  # Always download Windows dependencies for cross-compilation
             for name, url in deps.items():
                 output_file = f"{name}{'.exe' if os_name == 'windows' else '.deb'}"
                 if not os.path.exists(output_file):
                     logging.info(f"Downloading {name}...")
                     try:
-                        # Use wget for all downloads
-                        subprocess.run(
-                            ["wget", "--no-verbose", "--show-progress", url, "-O", output_file],
-                            check=True,
-                            capture_output=True
-                        )
+                        # First try with wget
+                        try:
+                            result = subprocess.run(
+                                ["wget", "--no-verbose", "--show-progress", url, "-O", output_file],
+                                check=True,
+                                capture_output=True,
+                                text=True
+                            )
+                        except subprocess.CalledProcessError as e:
+                            logging.warning(f"wget failed, trying curl: {e.stderr}")
+                            # If wget fails, try curl
+                            result = subprocess.run(
+                                ["curl", "-L", url, "-o", output_file],
+                                check=True,
+                                capture_output=True,
+                                text=True
+                            )
                         
                         # Verify the downloaded file
                         if os.path.exists(output_file):
@@ -300,37 +425,59 @@ def download_dependencies():
                             
                     except subprocess.CalledProcessError as e:
                         logging.error(f"Failed to download {name}: {e.stderr}")
+                        if os.path.exists(output_file):
+                            os.remove(output_file)  # Clean up partial download
                         raise
                     except Exception as e:
                         logging.error(f"Unexpected error downloading {name}: {str(e)}")
+                        if os.path.exists(output_file):
+                            os.remove(output_file)  # Clean up partial download
                         raise
+                else:
+                    logging.info(f"File already exists: {output_file}")
+                    
+                # Verify the file is valid
+                if os.path.exists(output_file):
+                    file_size = os.path.getsize(output_file)
+                    if file_size < 1000000:  # Git installer should be at least 1MB
+                        logging.error(f"Downloaded file {output_file} is too small ({file_size} bytes)")
+                        os.remove(output_file)
+                        raise Exception(f"Invalid download: {output_file} is too small")
+                    logging.info(f"Verified {output_file} is valid (size: {file_size} bytes)")
 
 def main():
     """Main build process"""
     try:
         logging.info("Starting build process...")
         
-        # Clean previous build
+        # Check if virtual environment exists and is valid
+        if not os.path.exists(VENV_PYTHON):
+            logging.info("Virtual environment not found or invalid. Creating new one...")
+            create_virtual_environment()
+        else:
+            logging.info("Using existing virtual environment")
+        
+        # Clean previous build artifacts
         clean_build()
         
-        # Check and install dependencies (this will create the virtual environment)
+        # Check and install dependencies
         check_dependencies()
-        
-        # Verify virtual environment exists
-        if not os.path.exists(VENV_PYTHON):
-            raise FileNotFoundError(f"Virtual environment Python not found at {VENV_PYTHON}")
         
         # Download required files first
         logging.info("Downloading required dependencies...")
         download_dependencies()
         
-        # Convert icon for Windows
-        if OS == "windows":
-            convert_icon()
+        # Verify downloaded files exist and are valid
+        required_files = [
+            "git.exe",
+            ICON_FILE
+        ]
         
-        # Create version info for Windows
-        if OS == "windows":
-            create_version_info()
+        for file in required_files:
+            if not os.path.exists(file):
+                raise FileNotFoundError(f"Required file not found: {file}")
+            file_size = os.path.getsize(file)
+            logging.info(f"Verified file exists: {file} (size: {file_size} bytes)")
         
         # Build executable
         build_executable()

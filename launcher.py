@@ -387,7 +387,7 @@ def install_python(progress_bar, label):
             
             if os.path.exists(installer):
                 os.remove(installer)
-                
+            
             # Update PATH environment variable for this process
             os.environ["PATH"] = os.path.dirname(sys.executable) + os.pathsep + os.environ["PATH"]
             
@@ -426,7 +426,7 @@ def install_python(progress_bar, label):
         update_progress(progress_bar, label, 30, "Python installed successfully.")
         
     except Exception as e:
-        logging.error(f"Python installation failed: {str(e)}")
+        update_progress(progress_bar, label, 0, f"Error: {str(e)}")
         raise
 
 def install_git(progress_bar, label):
@@ -748,8 +748,8 @@ class ModernDialog(tk.Toplevel):
         self.content_frame.pack(fill=tk.BOTH, expand=True)
         
         # Set icon
-        icon_path = get_resource_path(ICON_FILE)
-        if os.path.exists(icon_path):
+    icon_path = get_resource_path(ICON_FILE)
+    if os.path.exists(icon_path):
             try:
                 self.iconphoto(True, tk.PhotoImage(file=icon_path))
             except Exception as e:
@@ -849,8 +849,8 @@ class LauncherApp:
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
         
         # Set icon
-        icon_path = get_resource_path(ICON_FILE)
-        if os.path.exists(icon_path):
+    icon_path = get_resource_path(ICON_FILE)
+    if os.path.exists(icon_path):
             try:
                 self.root.iconphoto(True, tk.PhotoImage(file=icon_path))
             except Exception as e:
@@ -1120,7 +1120,7 @@ class LauncherApp:
         if not self.install_dir:
             ErrorDialog(self.root, "Error", "Game installation not found.")
             return
-            
+
         success = launch_game(self.install_dir, self.root)
         if not success:
             # If launch failed but we didn't quit, show an error dialog
@@ -1131,7 +1131,7 @@ class LauncherApp:
         if not self.install_dir:
             ErrorDialog(self.root, "Error", "Game installation not found.")
             return
-            
+
         delete_save(self.install_dir)
         
         # Refresh stats display

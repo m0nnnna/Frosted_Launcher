@@ -49,17 +49,8 @@ def create_virtual_environment():
     if not os.path.exists("venv"):
         logging.info("Creating virtual environment...")
         try:
-            # First, ensure python3-venv is installed
-            subprocess.run(
-                ["sudo", "apt-get", "install", "-y", "python3-venv"],
-                check=True,
-                capture_output=True
-            )
-            
             # Use system Python for virtual environment creation
-            system_python = "/usr/bin/python3"
-            if not os.path.exists(system_python):
-                system_python = "/usr/bin/python"
+            system_python = sys.executable
             
             logging.info(f"Using system Python: {system_python}")
             
@@ -81,8 +72,9 @@ def create_virtual_environment():
             if not os.path.exists(VENV_PYTHON):
                 raise FileNotFoundError(f"Virtual environment Python not found at {VENV_PYTHON}")
             
-            # Make sure the Python executable is executable
-            os.chmod(VENV_PYTHON, 0o755)
+            # Make sure the Python executable is executable (Unix-like systems only)
+            if OS != "windows":
+                os.chmod(VENV_PYTHON, 0o755)
             
             # Upgrade pip in the virtual environment
             subprocess.run(
@@ -111,38 +103,6 @@ def create_virtual_environment():
 def check_dependencies():
     """Check if required build dependencies are installed."""
     try:
-        # For Linux, try to install required system packages
-        if OS == "linux":
-            try:
-                # Update package lists
-                subprocess.run(
-                    ["sudo", "apt-get", "update"],
-                    check=True,
-                    capture_output=True
-                )
-                
-                # Install MinGW and required packages for cross-compilation
-                subprocess.run(
-                    ["sudo", "apt-get", "install", "-y", 
-                     "mingw-w64",
-                     "mingw-w64-tools",
-                     "mingw-w64-x86-64-dev",
-                     "python3-pip",
-                     "build-essential",
-                     "python3-dev"],
-                    check=True,
-                    capture_output=True
-                )
-                
-                logging.info("MinGW and build dependencies installed successfully")
-                
-            except subprocess.CalledProcessError as e:
-                logging.error(f"Failed to install MinGW: {e.stderr}")
-                raise
-            except Exception as e:
-                logging.error(f"Unexpected error during MinGW installation: {str(e)}")
-                raise
-        
         # Create virtual environment first
         create_virtual_environment()
         
@@ -216,132 +176,31 @@ def build_executable():
     if not os.path.exists(launcher_path):
         raise FileNotFoundError(f"Launcher file not found: {launcher_path}")
     
-    # Build Linux executable
-    logging.info("Building Linux executable...")
-    linux_cmd = [
+    # Build executable for current platform
+    logging.info(f"Building {OS} executable...")
+    cmd = [
         VENV_PYTHON,
         "-m",
         "PyInstaller",
-        "--name", f"{APP_NAME}_linux",
+        "--name", APP_NAME,
         "--onefile",
         "--noconsole",
         "--clean",
         "--add-data", f"{ICON_FILE}{os.pathsep}.",
         "--icon", f"{APP_NAME}{ICON_EXTENSION}",
         "--version-file", "version_info.txt",
-        "--add-binary", f"git.exe{os.pathsep}.",
-        "--distpath", "dist",
-        "--workpath", "build",
-        "--specpath", ".",
         "launcher.py"
     ]
     
-    # Build Windows executable
-    logging.info("Building Windows executable...")
-    if OS == "linux":
-        # For Linux, use MinGW for cross-compilation
-        # Set up cross-compilation environment
-        os.environ["CC"] = "x86_64-w64-mingw32-gcc"
-        os.environ["CXX"] = "x86_64-w64-mingw32-g++"
-        os.environ["PYTHONPATH"] = os.pathsep.join([os.getcwd(), os.environ.get("PYTHONPATH", "")])
-        
-        # Convert icon for Windows
-        convert_icon()
-        
-        # Create version info for Windows
-        create_version_info()
-        
-        windows_cmd = [
-            VENV_PYTHON,
-            "-m",
-            "PyInstaller",
-            "--name", f"{APP_NAME}_windows",
-            "--onefile",
-            "--noconsole",
-            "--clean",
-            "--add-data", f"{ICON_FILE}{os.pathsep}.",
-            "--icon", f"{APP_NAME}{ICON_EXTENSION}",
-            "--version-file", "version_info.txt",
-            "--add-binary", f"git.exe{os.pathsep}.",
-            "--target-architecture", "x86_64",
-            "--distpath", "dist",
-            "--workpath", "build",
-            "--specpath", ".",
-            "launcher.py"
-        ]
-    else:
-        # For Windows, use local Python
-        python_executable = VENV_PYTHON if os.path.exists(VENV_PYTHON) else sys.executable
-        windows_cmd = [
-            python_executable,
-            "-m",
-            "PyInstaller",
-            "--name", f"{APP_NAME}_windows",
-            "--onefile",
-            "--noconsole",
-            "--clean",
-            "--add-data", f"{ICON_FILE}{os.pathsep}.",
-            "--icon", f"{APP_NAME}{ICON_EXTENSION}",
-            "--version-file", "version_info.txt",
-            "--add-binary", f"git.exe{os.pathsep}.",
-            "launcher.py"
-        ]
-    
-    # Build Linux executable
     try:
-        logging.info("Running Linux build command:")
-        logging.info(" ".join(linux_cmd))
-        result = subprocess.run(
-            linux_cmd,
-            check=True,
-            capture_output=True,
-            text=True,
-            cwd=current_dir
-        )
-        logging.info("Linux build output:")
-        logging.info(result.stdout)
+        subprocess.run(cmd, check=True, capture_output=True)
+        logging.info(f"Build successful! Executable is in the 'dist' folder as '{APP_NAME}{EXECUTABLE_EXTENSION}'")
     except subprocess.CalledProcessError as e:
-        logging.error(f"Linux build failed: {e.stderr}")
+        logging.error(f"Build failed: {e.stderr}")
         raise
-    
-    # Build Windows executable
-    try:
-        logging.info("Running Windows build command:")
-        logging.info(" ".join(windows_cmd))
-        result = subprocess.run(
-            windows_cmd,
-            check=True,
-            capture_output=True,
-            text=True,
-            cwd=current_dir
-        )
-        logging.info("Windows build output:")
-        logging.info(result.stdout)
-    except subprocess.CalledProcessError as e:
-        logging.error(f"Windows build failed: {e.stderr}")
+    except Exception as e:
+        logging.error(f"Unexpected error during build: {str(e)}")
         raise
-    
-    # Verify both executables were created
-    linux_executable = os.path.join("dist", f"{APP_NAME}_linux")
-    windows_executable = os.path.join("dist", f"{APP_NAME}_windows")
-    
-    if not os.path.exists(linux_executable):
-        raise FileNotFoundError(f"Linux executable not created at {linux_executable}")
-    if not os.path.exists(windows_executable):
-        raise FileNotFoundError(f"Windows executable not created at {windows_executable}")
-    
-    # Rename Windows executable to add .exe extension
-    windows_exe = windows_executable + ".exe"
-    if os.path.exists(windows_exe):
-        os.remove(windows_exe)
-    os.rename(windows_executable, windows_exe)
-    
-    # Set permissions for Linux executable
-    os.chmod(linux_executable, 0o755)
-    
-    logging.info(f"Build completed successfully. Created:")
-    logging.info(f"Linux executable: {linux_executable}")
-    logging.info(f"Windows executable: {windows_exe}")
 
 def create_version_info():
     """Create version info file for Windows."""

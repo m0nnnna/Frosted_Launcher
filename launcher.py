@@ -36,6 +36,8 @@ logging.basicConfig(
 
 # Detect the operating system
 OS = platform.system().lower()
+if OS == "darwin":  # macOS
+    OS = "macos"
 CONFIG_FILE_NAME = "launcher_config.txt"
 ICON_FILE = "1.png"
 STATS_FILE = "game_stats.json"
@@ -422,6 +424,40 @@ def install_python(progress_bar, label):
             # Verify Python installation
             if not check_command("python3 --version"):
                 raise Exception("Python installation verification failed")
+                
+        elif OS == "macos":
+            # Check if Python is already installed
+            if check_command("python3 --version"):
+                update_progress(progress_bar, label, 30, "Python already installed.")
+                return
+                
+            # Check if Homebrew is installed
+            if not check_command("brew --version"):
+                # Install Homebrew
+                result = subprocess.run(
+                    '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"',
+                    shell=True,
+                    capture_output=True,
+                    text=True
+                )
+                
+                if result.returncode != 0:
+                    raise Exception(f"Homebrew installation failed: {result.stderr}")
+            
+            # Install Python using Homebrew
+            result = subprocess.run(
+                "brew install python@3.11",
+                shell=True,
+                capture_output=True,
+                text=True
+            )
+            
+            if result.returncode != 0:
+                raise Exception(f"Python installation failed: {result.stderr}")
+            
+            # Verify Python installation
+            if not check_command("python3 --version"):
+                raise Exception("Python installation verification failed")
         
         update_progress(progress_bar, label, 30, "Python installed successfully.")
         
@@ -490,6 +526,35 @@ def install_git(progress_bar, label):
             # Verify Git installation
             if not check_command("git --version"):
                 raise Exception("Git installation verification failed")
+                
+        elif OS == "macos":
+            # Check if Homebrew is installed
+            if not check_command("brew --version"):
+                # Install Homebrew
+                result = subprocess.run(
+                    '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"',
+                    shell=True,
+                    capture_output=True,
+                    text=True
+                )
+                
+                if result.returncode != 0:
+                    raise Exception(f"Homebrew installation failed: {result.stderr}")
+            
+            # Install Git using Homebrew
+            result = subprocess.run(
+                "brew install git",
+                shell=True,
+                capture_output=True,
+                text=True
+            )
+            
+            if result.returncode != 0:
+                raise Exception(f"Git installation failed: {result.stderr}")
+            
+            # Verify Git installation
+            if not check_command("git --version"):
+                raise Exception("Git installation verification failed")
         
         update_progress(progress_bar, label, 60, "Git installed successfully.")
         
@@ -498,16 +563,16 @@ def install_git(progress_bar, label):
         raise
 
 def install_requests(progress_bar, label):
-    """Install the requests module with improved error handling."""
-    update_progress(progress_bar, label, 70, "Installing requests module...")
+    """Install the requests and colorama modules with improved error handling."""
+    update_progress(progress_bar, label, 70, "Installing required modules...")
     try:
         python_cmd = "python" if OS == "windows" else "python3"
         
-        # Check if requests is already installed
-        check_cmd = f"{python_cmd} -c \"import requests; print('Module exists')\""
+        # Check if modules are already installed
+        check_cmd = f"{python_cmd} -c \"import requests, colorama; print('Modules exist')\""
         result = subprocess.run(check_cmd, shell=True, capture_output=True, text=True)
-        if "Module exists" in result.stdout:
-            update_progress(progress_bar, label, 80, "Requests module already installed.")
+        if "Modules exist" in result.stdout:
+            update_progress(progress_bar, label, 80, "Required modules already installed.")
             return
             
         if OS == "linux":
@@ -529,41 +594,41 @@ def install_requests(progress_bar, label):
             if result.returncode != 0:
                 # Fall back to pip if apt install fails
                 result = subprocess.run(
-                    f"{python_cmd} -m pip install --user requests",
+                    f"{python_cmd} -m pip install --user requests colorama",
                     shell=True,
                     capture_output=True,
                     text=True
                 )
                 
                 if result.returncode != 0:
-                    raise Exception(f"Requests installation failed: {result.stderr}")
+                    raise Exception(f"Module installation failed: {result.stderr}")
         else:
             # On Windows, use pip
             result = subprocess.run(
-                f"{python_cmd} -m pip install requests",
+                f"{python_cmd} -m pip install requests colorama",
                 shell=True,
                 capture_output=True,
                 text=True
             )
             
             if result.returncode != 0:
-                raise Exception(f"Requests installation failed: {result.stderr}")
+                raise Exception(f"Module installation failed: {result.stderr}")
         
-        # Verify requests installation
+        # Verify module installation
         result = subprocess.run(
-            f"{python_cmd} -c 'import requests'",
+            f"{python_cmd} -c 'import requests, colorama'",
             shell=True,
             capture_output=True,
             text=True
         )
         
         if result.returncode != 0:
-            raise Exception("Requests installation verification failed")
+            raise Exception("Module installation verification failed")
         
-        update_progress(progress_bar, label, 80, "Requests module installed successfully.")
+        update_progress(progress_bar, label, 80, "Required modules installed successfully.")
         
     except Exception as e:
-        logging.error(f"Requests installation failed: {str(e)}")
+        logging.error(f"Module installation failed: {str(e)}")
         raise
 
 def setup_game(progress_bar, label, install_dir):
@@ -672,6 +737,21 @@ def launch_game(install_dir, root):
             )
             return False
             
+        elif OS == "macos":
+            # On macOS, use Terminal.app
+            cmd = f'osascript -e \'tell application "Terminal" to do script "cd {game_dir} && {python_cmd} game.py; exit"\')'
+            process = subprocess.Popen(cmd, shell=True)
+            
+            # Monitor the process
+            def check_process():
+                if process.poll() is not None:
+                    on_game_exit()
+                else:
+                    root.after(1000, check_process)
+                    
+            root.after(1000, check_process)
+            return True
+            
     except Exception as e:
         messagebox.showerror("Error", f"Failed to launch game: {str(e)}")
         logging.error(f"Launch failed: {str(e)}")
@@ -748,8 +828,8 @@ class ModernDialog(tk.Toplevel):
         self.content_frame.pack(fill=tk.BOTH, expand=True)
         
         # Set icon
-    icon_path = get_resource_path(ICON_FILE)
-    if os.path.exists(icon_path):
+        icon_path = get_resource_path(ICON_FILE)
+        if os.path.exists(icon_path):
             try:
                 self.iconphoto(True, tk.PhotoImage(file=icon_path))
             except Exception as e:
@@ -849,8 +929,8 @@ class LauncherApp:
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
         
         # Set icon
-    icon_path = get_resource_path(ICON_FILE)
-    if os.path.exists(icon_path):
+        icon_path = get_resource_path(ICON_FILE)
+        if os.path.exists(icon_path):
             try:
                 self.root.iconphoto(True, tk.PhotoImage(file=icon_path))
             except Exception as e:
@@ -1169,6 +1249,9 @@ def main():
         except Exception as e:
             logging.error(f"Failed to load icon: {str(e)}")
     
+    # Create app instance
+    app = LauncherApp(root)
+    
     # Center window
     root.update_idletasks()
     width = root.winfo_width()
@@ -1176,9 +1259,6 @@ def main():
     x = (root.winfo_screenwidth() // 2) - (width // 2)
     y = (root.winfo_screenheight() // 2) - (height // 2)
     root.geometry(f'{width}x{height}+{x}+{y}')
-    
-    # Create app instance
-    app = LauncherApp(root)
     
     # Ensure window is visible and focused
     root.lift()

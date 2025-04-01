@@ -692,11 +692,16 @@ def launch_game(install_dir, root):
 
     try:
         if OS == "windows":
-            cmd = [python_cmd, "game.py"]
+            # On Windows, use pythonw.exe to prevent console window
+            pythonw_cmd = os.path.join(os.path.dirname(sys.executable), "pythonw.exe")
+            if not os.path.exists(pythonw_cmd):
+                pythonw_cmd = sys.executable.replace("python.exe", "pythonw.exe")
+            
+            cmd = [pythonw_cmd, "game.py"]
             logging.info(f"Launching game with: {' '.join(cmd)} in {game_dir}")
             
             # Run the game in the current process environment, non-blocking
-            process = subprocess.Popen(cmd, cwd=game_dir, shell=False)
+            process = subprocess.Popen(cmd, cwd=game_dir, shell=False, creationflags=subprocess.CREATE_NO_WINDOW)
             
             # Monitor the process
             def check_process():

@@ -76,9 +76,9 @@ def create_virtual_environment():
             if OS != "windows":
                 os.chmod(VENV_PYTHON, 0o755)
             
-            # Upgrade pip in the virtual environment
+            # Upgrade pip in the virtual environment using python -m pip
             subprocess.run(
-                [VENV_PIP, "install", "--upgrade", "pip"],
+                [VENV_PYTHON, "-m", "pip", "install", "--upgrade", "pip"],
                 check=True,
                 capture_output=True
             )
@@ -106,7 +106,7 @@ def check_dependencies():
         # Create virtual environment first
         create_virtual_environment()
         
-        # Install dependencies in virtual environment
+        # Install dependencies in virtual environment using python -m pip
         required_packages = [
             "pyinstaller",
             "pillow",
@@ -116,7 +116,7 @@ def check_dependencies():
         for package in required_packages:
             logging.info(f"Installing {package}...")
             subprocess.run(
-                [VENV_PIP, "install", package],
+                [VENV_PYTHON, "-m", "pip", "install", package],
                 check=True,
                 capture_output=True
             )

@@ -12,16 +12,39 @@ import logging
 import venv
 from pathlib import Path
 import time
+import urllib.request
+import ssl
 
 # Set up logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('build.log'),
-        logging.StreamHandler()
-    ]
-)
+def setup_logging():
+    """Set up logging with unique log file for each run."""
+    try:
+        # Generate a unique log file name using timestamp
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        log_file = f'build_{timestamp}.log'
+        
+        # Set up new logging configuration with unique file
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s - %(levelname)s - %(message)s',
+            handlers=[
+                logging.FileHandler(log_file),
+                logging.StreamHandler()
+            ]
+        )
+        logging.info(f"Logging to file: {log_file}")
+        return
+    except Exception as e:
+        # If file logging fails, fall back to console-only logging
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s - %(levelname)s - %(message)s',
+            handlers=[logging.StreamHandler()]
+        )
+        logging.warning(f"Could not set up file logging: {str(e)}. Logging to console only.")
+
+# Call setup_logging instead of direct logging.basicConfig
+setup_logging()
 
 # Configuration
 APP_NAME = "SnowCallerLauncher"
@@ -255,23 +278,32 @@ def download_dependencies():
                 if not os.path.exists(output_file):
                     logging.info(f"Downloading {name}...")
                     try:
-                        # First try with wget
-                        try:
-                            result = subprocess.run(
-                                ["wget", "--no-verbose", "--show-progress", url, "-O", output_file],
-                                check=True,
-                                capture_output=True,
-                                text=True
-                            )
-                        except subprocess.CalledProcessError as e:
-                            logging.warning(f"wget failed, trying curl: {e.stderr}")
-                            # If wget fails, try curl
-                            result = subprocess.run(
-                                ["curl", "-L", url, "-o", output_file],
-                                check=True,
-                                capture_output=True,
-                                text=True
-                            )
+                        # Create SSL context that ignores certificate verification
+                        context = ssl.create_default_context()
+                        context.check_hostname = False
+                        context.verify_mode = ssl.CERT_NONE
+                        
+                        # Download the file
+                        with urllib.request.urlopen(url, context=context) as response:
+                            if response.status != 200:
+                                raise Exception(f"Download failed with status code: {response.status}")
+                            
+                            # Get total size for progress tracking
+                            total_size = int(response.headers.get('content-length', 0))
+                            block_size = 8192
+                            downloaded = 0
+                            
+                            with open(output_file, 'wb') as f:
+                                while True:
+                                    buffer = response.read(block_size)
+                                    if not buffer:
+                                        break
+                                    downloaded += len(buffer)
+                                    f.write(buffer)
+                                    # Log progress
+                                    if total_size > 0:
+                                        progress = (downloaded / total_size) * 100
+                                        logging.info(f"Download progress: {progress:.1f}%")
                         
                         # Verify the downloaded file
                         if os.path.exists(output_file):
@@ -282,13 +314,8 @@ def download_dependencies():
                         else:
                             raise FileNotFoundError(f"Download completed but file not found: {output_file}")
                             
-                    except subprocess.CalledProcessError as e:
-                        logging.error(f"Failed to download {name}: {e.stderr}")
-                        if os.path.exists(output_file):
-                            os.remove(output_file)  # Clean up partial download
-                        raise
                     except Exception as e:
-                        logging.error(f"Unexpected error downloading {name}: {str(e)}")
+                        logging.error(f"Failed to download {name}: {str(e)}")
                         if os.path.exists(output_file):
                             os.remove(output_file)  # Clean up partial download
                         raise
@@ -325,6 +352,16 @@ def main():
         # Download required files first
         logging.info("Downloading required dependencies...")
         download_dependencies()
+        
+        # Create version info file for Windows
+        if OS == "windows":
+            logging.info("Creating version info file...")
+            create_version_info()
+        
+        # Convert icon for Windows
+        if OS == "windows":
+            logging.info("Converting icon...")
+            convert_icon()
         
         # Verify downloaded files exist and are valid
         required_files = [

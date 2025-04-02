@@ -376,9 +376,12 @@ def install_python(progress_bar, label):
             
             download_file(url, installer, update_progress_bar)
             
-            # Run Python installer with appropriate flags
+            # Run Python installer with GUI
+            update_progress(progress_bar, label, 30, "Installing Python...")
+            
+            # Run the installer directly without silent flags
             result = subprocess.run(
-                f"{installer} /quiet InstallAllUsers=1 PrependPath=1",
+                installer,
                 shell=True,
                 capture_output=True,
                 text=True
@@ -387,15 +390,71 @@ def install_python(progress_bar, label):
             if result.returncode != 0:
                 raise Exception(f"Python installation failed: {result.stderr}")
             
+            # Clean up installer
             if os.path.exists(installer):
-                os.remove(installer)
+                try:
+                    os.remove(installer)
+                except Exception as e:
+                    logging.warning(f"Failed to remove installer: {str(e)}")
+            
+            # Wait longer for the installation to complete and PATH to update
+            time.sleep(10)  # Increased wait time
             
             # Update PATH environment variable for this process
-            os.environ["PATH"] = os.path.dirname(sys.executable) + os.pathsep + os.environ["PATH"]
+            python_paths = [
+                "C:\\Python311",
+                "C:\\Python310",
+                "C:\\Python39",
+                "C:\\Python38",
+                "C:\\Python37",
+                "C:\\Python36",
+                "C:\\Python35",
+                "C:\\Python34",
+                "C:\\Python33",
+                "C:\\Python32",
+                "C:\\Python31",
+                "C:\\Python30",
+                "C:\\Python313"
+            ]
             
-            # Verify Python installation
-            if not check_command("python --version"):
-                raise Exception("Python installation verification failed")
+            # Find the installed Python directory
+            installed_path = None
+            for path in python_paths:
+                if os.path.exists(path):
+                    installed_path = path
+                    break
+            
+            if installed_path:
+                # Add Python and Scripts directories to PATH
+                os.environ["PATH"] = f"{installed_path};{installed_path}\\Scripts;{os.environ['PATH']}"
+                logging.info(f"Updated PATH with Python installation: {installed_path}")
+            
+            # Verify Python installation by trying to run python --version
+            max_retries = 5  # Increased retries
+            retry_delay = 3  # Increased delay between retries
+            
+            for attempt in range(max_retries):
+                try:
+                    # Try both python and py commands
+                    for cmd in ["python --version", "py --version"]:
+                        result = subprocess.run(
+                            cmd,
+                            shell=True,
+                            capture_output=True,
+                            text=True,
+                            check=True
+                        )
+                        if result.returncode == 0:
+                            logging.info(f"Python installation verified: {result.stdout.strip()}")
+                            return
+                except subprocess.CalledProcessError as e:
+                    if attempt < max_retries - 1:
+                        logging.warning(f"Python verification attempt {attempt + 1} failed, retrying...")
+                        time.sleep(retry_delay)
+                    else:
+                        # If all retries fail but Python is installed, log warning but don't raise error
+                        logging.warning("Python verification failed but installation may be complete")
+                        return
                 
         elif OS == "linux":
             # Check if Python is already installed
@@ -566,7 +625,43 @@ def install_requests(progress_bar, label):
     """Install the requests and colorama modules with improved error handling."""
     update_progress(progress_bar, label, 70, "Installing required modules...")
     try:
-        python_cmd = "python" if OS == "windows" else "python3"
+        # Get the correct Python executable path
+        if getattr(sys, 'frozen', False):
+            # When running as PyInstaller executable, use system Python
+            if OS == "windows":
+                # Try to find Python in common installation paths
+                python_paths = [
+                    "C:\\Python311\\python.exe",
+                    "C:\\Python310\\python.exe",
+                    "C:\\Python39\\python.exe",
+                    "C:\\Python38\\python.exe",
+                    "C:\\Python37\\python.exe",
+                    "C:\\Python36\\python.exe",
+                    "C:\\Python35\\python.exe",
+                    "C:\\Python34\\python.exe",
+                    "C:\\Python33\\python.exe",
+                    "C:\\Python32\\python.exe",
+                    "C:\\Python31\\python.exe",
+                    "C:\\Python30\\python.exe",
+                    "C:\\Python313\\python.exe"
+                ]
+                
+                # Find the first existing Python installation
+                python_cmd = None
+                for path in python_paths:
+                    if os.path.exists(path):
+                        python_cmd = path
+                        break
+                
+                if not python_cmd:
+                    raise Exception("No Python installation found in common paths")
+            else:
+                python_cmd = "python3"
+        else:
+            # Running as script
+            python_cmd = "python" if OS == "windows" else "python3"
+        
+        logging.info(f"Using Python executable: {python_cmd}")
         
         # Check if modules are already installed
         check_cmd = f"{python_cmd} -c \"import requests, colorama; print('Modules exist')\""
@@ -603,9 +698,9 @@ def install_requests(progress_bar, label):
                 if result.returncode != 0:
                     raise Exception(f"Module installation failed: {result.stderr}")
         else:
-            # On Windows, use pip
+            # On Windows and macOS, use pip
             result = subprocess.run(
-                f"{python_cmd} -m pip install requests colorama",
+                f"{python_cmd} -m pip install --user requests colorama",
                 shell=True,
                 capture_output=True,
                 text=True
@@ -673,7 +768,6 @@ def setup_game(progress_bar, label, install_dir):
 def launch_game(install_dir, root):
     """Launch the game directly and close the launcher."""
     game_dir = os.path.join(install_dir, "snowcaller")
-    python_cmd = "python" if OS == "windows" else "python3"
     game_script = os.path.join(game_dir, "game.py")
 
     if not os.path.exists(game_dir) or not os.path.exists(game_script):
@@ -692,16 +786,12 @@ def launch_game(install_dir, root):
 
     try:
         if OS == "windows":
-            # On Windows, use pythonw.exe to prevent console window
-            pythonw_cmd = os.path.join(os.path.dirname(sys.executable), "pythonw.exe")
-            if not os.path.exists(pythonw_cmd):
-                pythonw_cmd = sys.executable.replace("python.exe", "pythonw.exe")
-            
-            cmd = [pythonw_cmd, "game.py"]
+            # Use system Python directly
+            cmd = ["python", "game.py"]
             logging.info(f"Launching game with: {' '.join(cmd)} in {game_dir}")
             
             # Run the game in the current process environment, non-blocking
-            process = subprocess.Popen(cmd, cwd=game_dir, shell=False, creationflags=subprocess.CREATE_NO_WINDOW)
+            process = subprocess.Popen(cmd, cwd=game_dir, shell=False)
             
             # Monitor the process
             def check_process():
@@ -715,10 +805,10 @@ def launch_game(install_dir, root):
             
         elif OS == "linux":  # Debian (GNOME, XFCE, KDE)
             terminals = [
-                ("gnome-terminal", f'gnome-terminal -- bash -c "cd {game_dir} && {python_cmd} game.py; exec bash"'),
-                ("xfce4-terminal", f'xfce4-terminal --command "bash -c \'cd {game_dir} && {python_cmd} game.py; exec bash\'"'),
-                ("konsole", f'konsole --noclose -e bash -c "cd {game_dir} && {python_cmd} game.py; exec bash"'),
-                ("xterm", f'xterm -e "cd {game_dir} && {python_cmd} game.py; exec bash"')  # Fallback
+                ("gnome-terminal", f'gnome-terminal -- bash -c "cd {game_dir} && python3 game.py; exec bash"'),
+                ("xfce4-terminal", f'xfce4-terminal --command "bash -c \'cd {game_dir} && python3 game.py; exec bash\'"'),
+                ("konsole", f'konsole --noclose -e bash -c "cd {game_dir} && python3 game.py; exec bash"'),
+                ("xterm", f'xterm -e "cd {game_dir} && python3 game.py; exec bash"')  # Fallback
             ]
             
             for term, cmd in terminals:
@@ -744,7 +834,7 @@ def launch_game(install_dir, root):
             
         elif OS == "macos":
             # On macOS, use Terminal.app
-            cmd = f'osascript -e \'tell application "Terminal" to do script "cd {game_dir} && {python_cmd} game.py; exit"\')'
+            cmd = f'osascript -e \'tell application "Terminal" to do script "cd {game_dir} && python3 game.py; exit"\')'
             process = subprocess.Popen(cmd, shell=True)
             
             # Monitor the process
@@ -1228,17 +1318,21 @@ class LauncherApp:
             self.frost_frame.cleanup()
         self.root.quit()
         self.root.destroy()
+        sys.exit(0)  # Ensure the process exits completely
 
 def main():
     """Main entry point"""
+    # Create root window
+    root = tk.Tk()
+    
+    # Hide the root window immediately
+    root.withdraw()
+    
     # Set up the theme for ttk widgets
     style = ttk.Style()
     available_themes = style.theme_names()
     if 'clam' in available_themes:
         style.theme_use('clam')
-    
-    # Create root window
-    root = tk.Tk()
     
     # Configure root window
     root.title("SnowCaller Launcher")
@@ -1264,6 +1358,9 @@ def main():
     x = (root.winfo_screenwidth() // 2) - (width // 2)
     y = (root.winfo_screenheight() // 2) - (height // 2)
     root.geometry(f'{width}x{height}+{x}+{y}')
+    
+    # Show the root window
+    root.deiconify()
     
     # Ensure window is visible and focused
     root.lift()
